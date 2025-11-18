@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Равные отрезки и углы внутри равностороннего трреугольника</title>
+  <style>
+body {
+  display: flex;
+  flex-direction: row;
+  font-family: system-ui, sans-serif;
+  margin: 0;
+}
+
+#canvas {
+  border: 1px solid #ccc;
+  background: #fff;
+  flex: 1;
+}
+
+.edge { stroke: black; stroke-width: 2; fill: none; }
+.edge-dash { stroke: #777; stroke-width: 2; fill: none; stroke-dasharray: 6 5; }
+.vertex { fill: black; }
+.arc { stroke: #d62323; stroke-width: 2; fill: none; }
+.arc-label { font-size: 12px; fill: #333; dominant-baseline: middle; text-anchor: middle; }
+.vertex-label { font-size: 14px; fill: #000; }
+
+#panel {
+  margin-left: 24px;
+  padding: 12px;
+  border: 1px solid #aaa;
+  width: 420px;
+  background: #fff;
+}
+#panel h3 { margin-top: 0; }
+#values { margin-top: 12px; }
+#values section { margin-bottom: 12px; }
+#values p { margin: 4px 0; }
+label, input, button { font-size: 14px; }
+
+/* Кнопка меню */
+#togglePanel {
+  display: none; /* на десктопе скрыта */
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  z-index: 2000;
+  font-size: 18px;
+  padding: 6px 10px;
+  border: 1px solid #aaa;
+  background: #fff;
+  cursor: pointer;
+}
+
+@media (max-width: 768px) {
+  body {
+    display: block; /* убираем flex */
+  }
+
+  #canvas {
+    width: 100vw;
+    height: 70vh;
+    flex: none;
+    border: 1px solid #ccc;
+  }
+
+  #togglePanel {
+    display: block; /* кнопка видна */
+  }
+
+  #panel {
+    display: none; /* панель скрыта по умолчанию */
+    margin-left: 0;
+    width: 100vw;
+    height: 100%;
+    background: #fff;
+    z-index: 1500;
+    overflow-y: auto;   /* <-- добавляем прокрутку */
+  }
+
+  #panel.open {
+    display: block; /* панель показывается поверх */
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100%;
+    background: #fff;
+    z-index: 1500;
+    overflow-y: auto;   /* <-- прокрутка сохраняется */
+  }
+}
+
+  </style>
+</head>
+<body>
+  <button id="togglePanel">☰ Меню</button>
+  <svg id="canvas" width="760" height="600" viewBox="0 0 760 600"></svg>
+
+  <div id="panel">
+    <h3>Панель управления</h3>
+    <label for="scenario">Количество секций:</label><br>
+    <input id="scenario" type="number" min="0" max="25" value="1" step="1">
+    <br><br>
+    <button id="drawBtn">Рисовать</button>
+
+    <div id="values">
+      <h4>Значения</h4>
+      <section id="anglesBlock"></section>
+      <section id="segmentsBlock"></section>
+    </div>
+  </div>
+
+  <script>
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.getElementById('canvas');
+    const anglesBlock = document.getElementById('anglesBlock');
+    const segmentsBlock = document.getElementById('segmentsBlock');
+
+    // Мобильное раскрытие/схлопывание панели
+    document.getElementById('togglePanel').addEventListener('click', () => {
+      document.getElementById('panel').classList.toggle('open');
+    });
+
+    function add(tag, attrs) {
+      const el = document.createElementNS(ns, tag);
+      Object.entries(attrs).forEach(([k,v]) => el.setAttribute(k, v));
+      svg.appendChild(el);
+      return el;
+    }
+    function norm(v) { const L = Math.hypot(v.x, v.y) || 1; return { x: v.x / L, y: v.y / L }; }
+    function rotate(u, ang) {
+      const c = Math.cos(ang), s = Math.sin(ang);
+      return { x: u.x * c - u.y * s, y: u.x * s + u.y * c };
+    }
+    function angleDeg(u, v) {
+      const nu = Math.hypot(u.x, u.y) || 1;
+      const nv = Math.hypot(v.x, v.y) || 1;
+      const c = Math.min(1, Math.max(-1, (u.x*v.x + u.y*v.y) / (nu*nv)));
+      return Math.acos(c) * 180 / Math.PI;
+    }
+    // Арка угла с вынесенной подписью
+    function drawAngleArcAt(P, Uprev, Unext, label, arcRadius=28) {
+      const start = { x: P.x + Uprev.x * arcRadius, y: P.y + Uprev.y * arcRadius };
+      const end   = { x: P.x + Unext.x * arcRadius, y: P.y + Unext.y * arcRadius };
+      const cross = Uprev.x * Unext.y - Uprev.y * Unext.x;
+      const sweep = (cross > 0) ? 1 : 0;
+      const d = `M ${start.x} ${start.y} A ${arcRadius} ${arcRadius} 0 0 ${sweep} ${end.x} ${end.y}`;
+      add('path', { d, class: 'arc' });
+      const bis = norm({ x: Uprev.x + Unext.x, y: Uprev.y + Unext.y });
+      const labelRadius = arcRadius * 1.45;
+      const labelPos = { x: P.x + bis.x * labelRadius, y: P.y + bis.y * labelRadius };
+      add('text', { x: labelPos.x, y: labelPos.y, class: 'arc-label' }).textContent = label;
+    }
+    function insideTriangle(A,B,C,P){
+      const v0={x:C.x-A.x,y:C.y-A.y};
+      const v1={x:B.x-A.x,y:B.y-A.y};
+      const v2={x:P.x-A.x,y:P.y-A.y};
+      const d00=v0.x*v0.x+v0.y*v0.y;
+      const d01=v0.x*v1.x+v0.y*v1.y;
+      const d11=v1.x*v1.x+v1.y*v1.y;
+      const d20=v2.x*v0.x+v2.y*v0.y;
+      const d21=v2.x*v1.x+v2.y*v1.y;
+      const denom = d00*d11 - d01*d01;
+      if (Math.abs(denom) < 1e-9) return false;
+      const v = (d11*d20 - d01*d21) / denom;
+      const w = (d00*d21 - d01*d20) / denom;
+      const u = 1 - v - w;
+      return u>=-1e-9 && v>=-1e-9 && w>=-1e-9;
+    }
+
+    // Цепочка равных углов и равных сегментов (AB=BC=1 ед.)
+    function computeChain(A,B,C,S){
+      const k = (2*Math.PI/3)/(S+1);
+      const AB_len = Math.hypot(B.x - A.x, B.y - A.y);
+      const AC_len = Math.hypot(C.x - A.x, C.y - A.y);
+      const AC_units = AC_len / AB_len; // длина AC в ед.
+      const L_units = AC_units * Math.sin(k/2) / Math.sin(S*k/2); // длина сегмента в ед.
+
+      const Uab = norm({ x: B.x - A.x, y: B.y - A.y });
+      const dirPlus = rotate(Uab, +k);
+      const dirMinus = rotate(Uab, -k);
+
+      const stepLenPx = L_units * AB_len;
+
+      const P1plus = { x: A.x + stepLenPx*dirPlus.x, y: A.y + stepLenPx*dirPlus.y };
+      const P1minus = { x: A.x + stepLenPx*dirMinus.x, y: A.y + stepLenPx*dirMinus.y };
+      const usePlus = insideTriangle(A,B,C,P1plus) || !insideTriangle(A,B,C,P1minus);
+      const dir = usePlus ? dirPlus : dirMinus;
+      const sign = usePlus ? +1 : -1;
+
+      const points = [];
+      let P = { x: A.x, y: A.y };
+      let d = { x: dir.x, y: dir.y };
+      for (let i = 0; i < S-1; i++) {
+        P = { x: P.x + stepLenPx*d.x, y: P.y + stepLenPx*d.y };
+        points.push(P);
+        d = rotate(d, sign*k);
+      }
+
+      return { points, k, L_units, AC_units, sign, firstDir: dir };
+    }
+
+    function draw() {
+      svg.innerHTML = '';
+      anglesBlock.innerHTML = '';
+      segmentsBlock.innerHTML = '';
+
+      // Равносторонний треугольник в кадре
+      const side = 480;
+      const cx = 380, cy = 500;
+      const h = side * Math.sqrt(3) / 2;
+
+      const A = { x: cx - side/2, y: cy };
+      const B = { x: cx + side/2, y: cy };
+      const C = { x: cx, y: cy - h };
+
+      const scenario = parseInt(document.getElementById('scenario').value, 10);
+
+      // Стороны AB, BC, пунктир AC
+      add('line', { x1: A.x, y1: A.y, x2: B.x, y2: B.y, class: 'edge' });
+      add('line', { x1: B.x, y1: B.y, x2: C.x, y2: C.y, class: 'edge' });
+      add('line', { x1: A.x, y1: A.y, x2: C.x, y2: C.y, class: 'edge-dash' });
+      [A, B, C].forEach(v => add('circle', { cx: v.x, cy: v.y, r: 5, class: 'vertex' }));
+      add('text', { x: A.x - 24, y: A.y + 26, class: 'vertex-label' }).textContent = 'A';
+      add('text', { x: B.x + 26, y: B.y + 26, class: 'vertex-label' }).textContent = 'B';
+      add('text', { x: C.x, y: C.y - 28, class: 'vertex-label' }).textContent = 'C';
+
+      // Углы для визуализации дуг
+      const Uab = norm({ x: B.x - A.x, y: B.y - A.y });
+      const Uba = norm({ x: A.x - B.x, y: A.y - B.y });
+      const Ubc = norm({ x: C.x - B.x, y: C.y - B.y });
+      const Ucb = norm({ x: B.x - C.x, y: B.y - C.y });
+      const Uac = norm({ x: C.x - A.x, y: C.y - A.y });
+      const Uca = norm({ x: A.x - C.x, y: A.y - C.y });
+
+      if (scenario === 0) {
+        // α,β,γ = 60° и только длины сторон
+        drawAngleArcAt(A, Uab, Uac, 'α');
+        drawAngleArcAt(B, Uba, Ubc, 'β');
+        drawAngleArcAt(C, Ucb, Uca, 'γ');
+
+        ['α = 60.00°', 'β = 60.00°', 'γ = 60.00°'].forEach(t => {
+          const p = document.createElement('p'); p.textContent = t; anglesBlock.appendChild(p);
+        });
+
+        const AB_len = Math.hypot(B.x - A.x, B.y - A.y);
+        const AC_len = Math.hypot(C.x - A.x, C.y - A.y);
+        const AC_units = AC_len / AB_len;
+
+        const segments = [
+          `AB = 1.00 ед.`,
+          `BC = 1.00 ед.`,
+          `AC = ${AC_units.toFixed(2)} ед.`
+        ];
+        segments.forEach(t => { const p = document.createElement('p'); p.textContent = t; segmentsBlock.appendChild(p); });
+        return;
+      }
+
+      if (scenario === 1) {
+        // Визуализация α,β,γ = 60° и длина AC вместо сегментов
+        add('line', { x1: A.x, y1: A.y, x2: C.x, y2: C.y, class: 'edge' });
+        drawAngleArcAt(A, Uab, Uac, 'α');
+        drawAngleArcAt(B, Uba, Ubc, 'β');
+        drawAngleArcAt(C, Ucb, Uca, 'γ');
+
+        ['α = 60.00°', 'β = 60.00°', 'γ = 60.00°'].forEach(t => {
+          const p = document.createElement('p'); p.textContent = t; anglesBlock.appendChild(p);
+        });
+
+        const AB_len = Math.hypot(B.x - A.x, B.y - A.y);
+        const AC_len = Math.hypot(C.x - A.x, C.y - A.y);
+        const AC_units = AC_len / AB_len;
+
+        const segments = [
+          `AB = 1.00 ед.`,
+          `BC = 1.00 ед.`,
+          `AC = ${AC_units.toFixed(2)} ед.`
+        ];
+        segments.forEach(t => { const p = document.createElement('p'); p.textContent = t; segmentsBlock.appendChild(p); });
+        return;
+      }
+
+      // Сценарии S ≥ 2
+      const S = Math.min(25, Math.max(2, scenario));
+      const { points, k, L_units, AC_units, sign, firstDir } = computeChain(A,B,C,S);
+
+      // Рисуем звенья A→P1→…→P_{S−1}→C
+      let prev = A;
+      for (let i = 0; i < S - 1; i++) {
+        const Pi = points[i];
+        add('line', { x1: prev.x, y1: prev.y, x2: Pi.x, y2: Pi.y, class: 'edge' });
+        prev = Pi;
+      }
+      add('line', { x1: prev.x, y1: prev.y, x2: C.x, y2: C.y, class: 'edge' });
+
+      // Точки и подписи
+      points.forEach((P, idx) => {
+        add('circle', { cx: P.x, cy: P.y, r: 5, class: 'vertex' });
+        add('text', { x: P.x + 12, y: P.y - 10, class: 'vertex-label' }).textContent = `P${idx+1}`;
+      });
+
+      // Углы: β константа, α относительно AB, γ относительно CB; φ_i — между входящим и исходящим
+      drawAngleArcAt(B, Uba, Ubc, 'β');
+
+      const Uap1 = norm({ x: points[0].x - A.x, y: points[0].y - A.y });
+      drawAngleArcAt(A, Uab, Uap1, 'α');
+
+      const lastP = points[points.length - 1];
+      const Ucplast = norm({ x: lastP.x - C.x, y: lastP.y - C.y });
+      drawAngleArcAt(C, Ucb, Ucplast, 'γ');
+
+      // φ_i при внутренних точках: восстановим направления сегментов
+      const segDirs = [];
+      let d = { x: firstDir.x, y: firstDir.y };
+      for (let i = 0; i < S - 1; i++) {
+        segDirs.push({ x: d.x, y: d.y });
+        d = rotate(d, sign*k);
+      }
+      const lastDir = norm({ x: C.x - points[points.length - 1].x, y: C.y - points[points.length - 1].y });
+      const extLen = 42;
+      for (let i = 0; i < S - 1; i++) {
+        const P = points[i];
+        const Uprev = norm(segDirs[i]);
+        const Unext = (i === S - 2) ? lastDir : norm(segDirs[i+1]);
+
+        const PextPrev = { x: P.x + Uprev.x * extLen, y: P.y + Uprev.y * extLen };
+        const PextNext = { x: P.x + Unext.x * extLen, y: P.y + Unext.y * extLen };
+        add('line', { x1: P.x, y1: P.y, x2: PextPrev.x, y2: PextPrev.y, class: 'edge' });
+        add('line', { x1: P.x, y1: P.y, x2: PextNext.x, y2: PextNext.y, class: 'edge' });
+        drawAngleArcAt(P, Uprev, Unext, `φ${i+1}`);
+      }
+
+      // Панель значений: сначала углы
+      const clamp60 = d => Math.min(60, Math.max(0, d));
+      const alpha = clamp60(angleDeg(Uab, Uap1));
+      const gamma = clamp60(angleDeg(Ucb, Ucplast));
+
+      const angleVals = [
+        `α = ${alpha.toFixed(2)}°`,
+        `β = 60.00°`,
+        `γ = ${gamma.toFixed(2)}°`
+      ];
+      for (let i = 0; i < S - 1; i++) {
+        const Uprev = norm(segDirs[i]);
+        const Unext = (i === S - 2) ? lastDir : norm(segDirs[i+1]);
+        const phi = clamp60(angleDeg(Uprev, Unext));
+        angleVals.push(`φ${i+1} = ${phi.toFixed(2)}°`);
+      }
+      angleVals.forEach(t => { const p = document.createElement('p'); p.textContent = t; anglesBlock.appendChild(p); });
+
+      // Затем отрезки: AB=BC=1.00 ед., AC, длина сегмента — все с двумя знаками и «ед.»
+      const segmentVals = [
+        `AB = 1.00 ед.`,
+        `BC = 1.00 ед.`,
+        `AC = ${AC_units.toFixed(2)} ед.`,
+        `Длина каждого сегмента = ${L_units.toFixed(2)} ед.`
+      ];
+      segmentVals.forEach(t => { const p = document.createElement('p'); p.textContent = t; segmentsBlock.appendChild(p); });
+    }
+
+    document.getElementById('drawBtn').addEventListener('click', () => {
+	  draw();
+	  // если ширина окна <= 768px, скрываем панель
+	  if (window.innerWidth <= 768) {
+		document.getElementById('panel').classList.remove('open');
+	  }
+	});
+    draw();
+  </script>
+</body>
+</html>
